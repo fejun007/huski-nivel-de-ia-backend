@@ -114,6 +114,7 @@ class AnswerItem(BaseModel):
     question_text: str
     answer_text: str
     option_label: Optional[str] = None
+    criteria: Optional[str] = None
 
 class EvaluatePayload(BaseModel):
     nome: str
@@ -191,7 +192,10 @@ def evaluate(payload: EvaluatePayload):
         tipo = {"mc": "Múltipla Escolha", "case": "Case", "review": "Review Reverso"}.get(a.question_type, a.question_type)
         lines.append(f"[{i}] {tipo} — {a.question_text}")
         resp = f"{a.option_label} — {a.answer_text}" if a.option_label else a.answer_text
-        lines.append(f"Resposta: {resp}\n")
+        lines.append(f"Resposta: {resp}")
+        if a.criteria:
+            lines.append(f"Critérios de avaliação desta questão: {a.criteria}")
+        lines.append("")
 
     prompt = EVAL_SYSTEM + "\n\n" + "\n".join(lines)
 
