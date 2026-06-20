@@ -4,7 +4,7 @@ import struct
 import json
 import re
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -17,9 +17,11 @@ try:
 except ImportError:
     _genai_ok = False
 
-SUPABASE_URL   = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
-SUPABASE_KEY   = os.getenv("SUPABASE_KEY", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+SUPABASE_URL    = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
+SUPABASE_KEY    = os.getenv("SUPABASE_KEY", "")
+GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "")
+PARTNER_API_KEY = os.getenv("PARTNER_API_KEY", "")
+FRONTEND_URL    = os.getenv("FRONTEND_URL", "https://huski-nivel-de-ia.vercel.app")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if (_genai_ok and GEMINI_API_KEY) else None
 
@@ -44,6 +46,43 @@ def supabase_headers():
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
+
+
+def require_partner_api_key(x_api_key: Optional[str] = Header(None)):
+    if not PARTNER_API_KEY:
+        raise HTTPException(status_code=503, detail="API de parceiros não configurada. Defina PARTNER_API_KEY.")
+    if not x_api_key or x_api_key != PARTNER_API_KEY:
+        raise HTTPException(status_code=401, detail="X-API-Key inválida ou ausente.")
+
+
+def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, result: dict):
+    if not SUPABASE_KEY:
+        return
+    try:
+        requests.post(
+            f"{SUPABASE_URL}/rest/v1/avaliacoes_resultado",
+            headers=supabase_headers(),
+            json={
+                "session_id": session_id,
+                "nome": nome,
+                "nivel": result.get("nivel"),
+                "titulo": result.get("titulo"),
+                "resumo": result.get("resumo"),
+                "questoes": result.get("questoes"),
+                "proximos_passos": result.get("proximos_passos"),
+                "respostas": answers,
+            },
+            timeout=10,
+        )
+        if session_id:
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao?id=eq.{session_id}",
+                headers=supabase_headers(),
+                json={"status": "concluido"},
+                timeout=10,
+            )
+    except Exception as e:
+        print(f"Erro ao salvar resultado no Supabase: {e}")
 
 
 app = FastAPI(title="Huski — Nível de IA API")
@@ -145,6 +184,12 @@ class AnswerItem(BaseModel):
 class EvaluatePayload(BaseModel):
     nome: str
     answers: List[AnswerItem]
+    session_id: Optional[str] = None
+
+
+class ExternalSessionCreatePayload(BaseModel):
+    nome: str
+    external_id: Optional[str] = None
 
 
 @app.get("/health")
@@ -247,4 +292,84 @@ def evaluate(payload: EvaluatePayload):
         else:
             raise HTTPException(status_code=500, detail="Erro ao parsear avaliação do modelo.")
 
+    save_evaluation_result(
+        session_id=payload.session_id,
+        nome=payload.nome,
+        answers=[a.model_dump() for a in payload.answers],
+        result=result,
+    )
+
     return result
+
+
+# ── API para integração com outras aplicações ──────────────────────
+
+@app.post("/api/v1/avaliacoes")
+def api_create_avaliacao(payload: ExternalSessionCreatePayload, _auth=Depends(require_partner_api_key)):
+    if not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Supabase não configurado no servidor.")
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
+            headers=supabase_headers(),
+            json={
+                "nome": payload.nome,
+                "status": "em_andamento",
+                "external_id": payload.external_id,
+            },
+            timeout=10,
+        )
+        if not r.ok:
+            raise HTTPException(status_code=502, detail=f"Erro Supabase: {r.status_code} {r.text}")
+        session_id = r.json()[0]["id"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    assessment_url = f"{FRONTEND_URL}/?session_id={session_id}&nome={payload.nome}"
+    return {"session_id": session_id, "assessment_url": assessment_url}
+
+
+@app.get("/api/v1/avaliacoes/{session_id}")
+def api_get_avaliacao(session_id: str, _auth=Depends(require_partner_api_key)):
+    if not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Supabase não configurado no servidor.")
+    try:
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/avaliacoes_resultado",
+            headers=supabase_headers(),
+            params={"session_id": f"eq.{session_id}", "order": "created_at.desc", "limit": 1},
+            timeout=10,
+        )
+        if not r.ok:
+            raise HTTPException(status_code=502, detail=f"Erro Supabase: {r.status_code} {r.text}")
+        rows = r.json()
+        if rows:
+            row = rows[0]
+            return {
+                "session_id": session_id,
+                "status": "concluido",
+                "nome": row.get("nome"),
+                "nivel": row.get("nivel"),
+                "titulo": row.get("titulo"),
+                "resumo": row.get("resumo"),
+                "questoes": row.get("questoes"),
+                "proximos_passos": row.get("proximos_passos"),
+                "criado_em": row.get("created_at"),
+            }
+
+        r2 = requests.get(
+            f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
+            headers=supabase_headers(),
+            params={"id": f"eq.{session_id}", "limit": 1},
+            timeout=10,
+        )
+        if r2.ok and r2.json():
+            return {"session_id": session_id, "status": r2.json()[0].get("status", "em_andamento")}
+
+        raise HTTPException(status_code=404, detail="Sessão não encontrada.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
