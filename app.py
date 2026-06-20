@@ -92,12 +92,34 @@ Avalie o usuário com base nas respostas do teste estruturado e retorne SOMENTE 
 RUBRICA:
 {RUBRICA}
 
+Para cada questão de múltipla escolha (tipo "mc"), escreva um "gabarito": uma frase curta explicando o que aquela
+resposta específica revela sobre o nível de maturidade em IA do candidato (não existe "certo ou errado", é diagnóstico).
+
+Para cada case e review reverso (tipo "case"/"review"), avalie a resposta do usuário contra os critérios por nível
+fornecidos na questão e escreva uma "critica" (2-4 frases, específica à resposta dada, citando o que faltou ou o que
+foi bem feito) e uma "nota_nivel" (1-5) que reflete em que nível da rubrica aquela resposta específica se encaixa.
+
 Formato obrigatório (sem texto fora do JSON):
 {{
   "nivel": <1-5>,
   "titulo": "<título exato do nível>",
   "resumo": "<2-3 frases referenciando respostas específicas do teste>",
-  "proximo_passo": "<1 ação concreta e acionável para evoluir>"
+  "questoes": [
+    {{
+      "question_id": "<id da questão>",
+      "tipo": "mc" | "case" | "review",
+      "pergunta": "<texto da questão>",
+      "resposta_usuario": "<resposta dada pelo usuário>",
+      "gabarito": "<obrigatório apenas para tipo mc>",
+      "critica": "<obrigatório apenas para tipo case/review>",
+      "nota_nivel": "<obrigatório apenas para tipo case/review, 1-5>"
+    }}
+  ],
+  "proximos_passos": [
+    "<ação concreta 1 para evoluir de nível>",
+    "<ação concreta 2 para evoluir de nível>",
+    "<ação concreta 3 para evoluir de nível>"
+  ]
 }}"""
 
 
