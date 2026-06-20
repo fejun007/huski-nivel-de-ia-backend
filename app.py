@@ -1,14 +1,33 @@
 import os
 import uuid
+import struct
+import base64
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 import anthropic
+from google import genai
+from google.genai import types as genai_types
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+SUPABASE_URL  = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
+SUPABASE_KEY  = os.getenv("SUPABASE_KEY", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+def _pcm_to_wav(pcm: bytes, rate: int = 24000, channels: int = 1, bits: int = 16) -> bytes:
+    data_size = len(pcm)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", data_size + 36, b"WAVE",
+        b"fmt ", 16, 1, channels, rate,
+        rate * channels * bits // 8,
+        channels * bits // 8, bits,
+        b"data", data_size,
+    )
+    return header + pcm
 
 def supabase_headers():
     return {
@@ -114,6 +133,9 @@ Após 5 a 7 trocas com informação suficiente, encerre a conversa dizendo que t
 Não inclua o bloco <resultado> antes de ter informação suficiente para avaliar com confiança.
 """
 
+class TTSPayload(BaseModel):
+    text: str
+
 class SessionCreatePayload(BaseModel):
     nome: str
     resposta_inicial: Optional[str] = None
@@ -121,6 +143,49 @@ class SessionCreatePayload(BaseModel):
 class ChatPayload(BaseModel):
     session_id: str
     message: str
+
+
+@app.post("/tts")
+def text_to_speech(payload: TTSPayload):
+    if not gemini_client:
+        raise HTTPException(status_code=503, detail="TTS não configurado. Defina GEMINI_API_KEY.")
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash-preview-tts",
+            contents=payload.text,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=genai_types.SpeechConfig(
+                    voice_config=genai_types.VoiceConfig(
+                        prebuilt_voice_config=genai_types.PrebuiltVoiceConfig(
+                            voice_name="Zephyr",  # voz feminina
+                        )
+                    )
+                ),
+            ),
+        )
+        part = response.candidates[0].content.parts[0]
+        audio_bytes = part.inline_data.data
+        mime = part.inline_data.mime_type or "audio/pcm"
+
+        if "pcm" in mime.lower() or "raw" in mime.lower() or mime == "audio/l16":
+            # Extrai sample rate do mime type se disponível (ex: audio/pcm;rate=24000)
+            rate = 24000
+            if "rate=" in mime:
+                try:
+                    rate = int(mime.split("rate=")[1].split(";")[0].strip())
+                except Exception:
+                    pass
+            audio_bytes = _pcm_to_wav(audio_bytes, rate)
+            mime = "audio/wav"
+
+        return Response(
+            content=audio_bytes,
+            media_type=mime,
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro TTS: {str(e)}")
 
 
 @app.post("/session/create")
