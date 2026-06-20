@@ -171,15 +171,18 @@ def text_to_speech(payload: TTSPayload):
 def create_session(payload: SessionCreatePayload):
     if not SUPABASE_KEY:
         return {"session_id": str(uuid.uuid4()), "warning": "Supabase não configurado"}
-    r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
-        headers=supabase_headers(),
-        json={"nome": payload.nome, "resposta_inicial": payload.resposta_inicial, "status": "em_andamento"},
-        timeout=10,
-    )
-    if not r.ok:
-        raise HTTPException(status_code=502, detail=f"Erro ao salvar sessão: {r.text}")
-    return {"session_id": r.json()[0]["id"], "nome": payload.nome}
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
+            headers=supabase_headers(),
+            json={"nome": payload.nome, "resposta_inicial": payload.resposta_inicial, "status": "em_andamento"},
+            timeout=10,
+        )
+        if not r.ok:
+            return {"session_id": str(uuid.uuid4()), "warning": f"Supabase error: {r.status_code}"}
+        return {"session_id": r.json()[0]["id"], "nome": payload.nome}
+    except Exception as e:
+        return {"session_id": str(uuid.uuid4()), "warning": str(e)}
 
 
 @app.post("/nivel-ia/evaluate")
