@@ -9,13 +9,17 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 import anthropic
-from google import genai
-from google.genai import types as genai_types
+try:
+    from google import genai
+    from google.genai import types as genai_types
+    _genai_ok = True
+except ImportError:
+    _genai_ok = False
 
 SUPABASE_URL  = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
 SUPABASE_KEY  = os.getenv("SUPABASE_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+gemini_client = (genai.Client(api_key=GEMINI_API_KEY) if (_genai_ok and GEMINI_API_KEY) else None)
 
 def _pcm_to_wav(pcm: bytes, rate: int = 24000, channels: int = 1, bits: int = 16) -> bytes:
     data_size = len(pcm)
@@ -148,7 +152,7 @@ class ChatPayload(BaseModel):
 @app.post("/tts")
 def text_to_speech(payload: TTSPayload):
     if not gemini_client:
-        raise HTTPException(status_code=503, detail="TTS não configurado. Defina GEMINI_API_KEY.")
+        raise HTTPException(status_code=503, detail="TTS não configurado. Defina GEMINI_API_KEY e instale google-genai.")
     try:
         response = gemini_client.models.generate_content(
             model="gemini-2.5-flash-preview-tts",
