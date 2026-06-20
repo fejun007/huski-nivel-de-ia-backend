@@ -17,15 +17,11 @@ try:
 except ImportError:
     _genai_ok = False
 
-import anthropic
-
 SUPABASE_URL   = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
 SUPABASE_KEY   = os.getenv("SUPABASE_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 
-gemini_client   = genai.Client(api_key=GEMINI_API_KEY) if (_genai_ok and GEMINI_API_KEY) else None
-anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_KEY) if ANTHROPIC_KEY else None
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if (_genai_ok and GEMINI_API_KEY) else None
 
 
 def _pcm_to_wav(pcm: bytes, rate: int = 24000, channels: int = 1, bits: int = 16) -> bytes:
@@ -129,7 +125,7 @@ def health():
     return {
         "status": "ok",
         "tts": gemini_client is not None,
-        "llm": anthropic_client is not None,
+        "llm": gemini_client is not None,
     }
 
 
@@ -187,8 +183,8 @@ def create_session(payload: SessionCreatePayload):
 
 @app.post("/nivel-ia/evaluate")
 def evaluate(payload: EvaluatePayload):
-    if not anthropic_client:
-        raise HTTPException(status_code=503, detail="Anthropic não configurado. Defina ANTHROPIC_API_KEY.")
+    if not gemini_client:
+        raise HTTPException(status_code=503, detail="Gemini não configurado. Defina GEMINI_API_KEY.")
 
     lines = [f"Candidato: {payload.nome}\n"]
     for i, a in enumerate(payload.answers, 1):
@@ -197,16 +193,17 @@ def evaluate(payload: EvaluatePayload):
         resp = f"{a.option_label} — {a.answer_text}" if a.option_label else a.answer_text
         lines.append(f"Resposta: {resp}\n")
 
-    answers_text = "\n".join(lines)
+    prompt = EVAL_SYSTEM + "\n\n" + "\n".join(lines)
 
-    response = anthropic_client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=700,
-        system=EVAL_SYSTEM,
-        messages=[{"role": "user", "content": answers_text}],
-    )
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        raw = response.text.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro Gemini: {str(e)}")
 
-    raw = response.content[0].text.strip()
     try:
         result = json.loads(raw)
     except Exception:
