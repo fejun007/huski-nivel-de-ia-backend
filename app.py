@@ -92,8 +92,10 @@ Avalie o usuário com base nas respostas do teste estruturado e retorne SOMENTE 
 RUBRICA:
 {RUBRICA}
 
-Para cada questão de múltipla escolha (tipo "mc"), escreva um "gabarito": uma frase curta explicando o que aquela
-resposta específica revela sobre o nível de maturidade em IA do candidato (não existe "certo ou errado", é diagnóstico).
+Para cada questão de múltipla escolha (tipo "mc"), as perguntas têm dificuldade (fácil/média/difícil) e uma resposta
+tecnicamente correta já verificada objetivamente pelo sistema (indicado em "Resposta correta/incorreta" no contexto).
+Escreva um "gabarito": confirme se a resposta do candidato estava correta ou incorreta, cite a alternativa certa
+quando o candidato errar, e explique brevemente o conceito por trás da resposta correta.
 
 Para cada case e review reverso (tipo "case"/"review"), avalie a resposta do usuário contra os critérios por nível
 fornecidos na questão e escreva uma "critica" (2-4 frases, específica à resposta dada, citando o que faltou ou o que
@@ -137,6 +139,8 @@ class AnswerItem(BaseModel):
     answer_text: str
     option_label: Optional[str] = None
     criteria: Optional[str] = None
+    is_correct: Optional[bool] = None
+    difficulty: Optional[str] = None   # 'facil' | 'media' | 'dificil'
 
 class EvaluatePayload(BaseModel):
     nome: str
@@ -213,8 +217,12 @@ def evaluate(payload: EvaluatePayload):
     for i, a in enumerate(payload.answers, 1):
         tipo = {"mc": "Múltipla Escolha", "case": "Case", "review": "Review Reverso"}.get(a.question_type, a.question_type)
         lines.append(f"[{i}] {tipo} — {a.question_text}")
+        if a.difficulty:
+            lines.append(f"Dificuldade da questão: {a.difficulty}")
         resp = f"{a.option_label} — {a.answer_text}" if a.option_label else a.answer_text
         lines.append(f"Resposta: {resp}")
+        if a.is_correct is not None:
+            lines.append(f"Resposta {'correta' if a.is_correct else 'incorreta'} (verificado objetivamente pelo sistema).")
         if a.criteria:
             lines.append(f"Critérios de avaliação desta questão: {a.criteria}")
         lines.append("")
