@@ -1,10 +1,22 @@
 import os
 import uuid
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import anthropic
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://jqvrmslrqpxesiuiyzuw.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+
+def supabase_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
 
 app = FastAPI(title="Huski — Nível de IA API")
 
@@ -102,9 +114,28 @@ Após 5 a 7 trocas com informação suficiente, encerre a conversa dizendo que t
 Não inclua o bloco <resultado> antes de ter informação suficiente para avaliar com confiança.
 """
 
+class SessionCreatePayload(BaseModel):
+    nome: str
+    resposta_inicial: Optional[str] = None
+
 class ChatPayload(BaseModel):
     session_id: str
     message: str
+
+
+@app.post("/session/create")
+def create_session(payload: SessionCreatePayload):
+    if not SUPABASE_KEY:
+        return {"session_id": str(uuid.uuid4()), "warning": "Supabase não configurado"}
+    r = requests.post(
+        f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
+        headers=supabase_headers(),
+        json={"nome": payload.nome, "resposta_inicial": payload.resposta_inicial, "status": "em_andamento"},
+        timeout=10,
+    )
+    if not r.ok:
+        raise HTTPException(status_code=502, detail=f"Erro ao salvar sessão: {r.text}")
+    return {"session_id": r.json()[0]["id"], "nome": payload.nome}
 
 
 @app.post("/nivel-ia/start")
