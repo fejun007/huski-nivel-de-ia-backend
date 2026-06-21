@@ -131,10 +131,15 @@ Avalie o usuário com base nas respostas do teste estruturado e retorne SOMENTE 
 RUBRICA:
 {RUBRICA}
 
-Para cada questão de múltipla escolha (tipo "mc"), as perguntas têm dificuldade (fácil/média/difícil) e uma resposta
-tecnicamente correta já verificada objetivamente pelo sistema (indicado em "Resposta correta/incorreta" no contexto).
-Escreva um "gabarito": confirme se a resposta do candidato estava correta ou incorreta, cite a alternativa certa
-quando o candidato errar, e explique brevemente o conceito por trás da resposta correta.
+Para cada questão de múltipla escolha (tipo "mc") existem dois grupos:
+1) Perguntas de autoavaliação (sem indicação de "Resposta correta/incorreta" no contexto) — são diagnósticas, não
+   existe certo ou errado. Escreva um "gabarito" explicando o que aquela resposta específica revela sobre o nível
+   de maturidade em IA do candidato.
+2) Perguntas técnicas adaptativas (com dificuldade fácil/média/difícil e "Resposta correta/incorreta" já verificada
+   objetivamente pelo sistema no contexto). Escreva um "gabarito" confirmando se a resposta estava correta ou
+   incorreta, citando a alternativa certa quando o candidato errar, e explicando brevemente o conceito por trás
+   da resposta correta. Leve em conta a progressão de dificuldade (acertar perguntas difíceis pesa mais do que
+   acertar perguntas fáceis) ao definir o nível final do candidato.
 
 Para cada case e review reverso (tipo "case"/"review"), avalie a resposta do usuário contra os critérios por nível
 fornecidos na questão e escreva uma "critica" (2-4 frases, específica à resposta dada, citando o que faltou ou o que
