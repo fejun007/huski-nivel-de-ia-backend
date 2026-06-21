@@ -55,7 +55,7 @@ def require_partner_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="X-API-Key inválida ou ausente.")
 
 
-def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, result: dict):
+def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, result: dict, email: Optional[str] = None, cpf: Optional[str] = None):
     if not SUPABASE_KEY:
         return
     try:
@@ -65,6 +65,8 @@ def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, 
             json={
                 "session_id": session_id,
                 "nome": nome,
+                "email": email,
+                "cpf": cpf,
                 "nivel": result.get("nivel"),
                 "titulo": result.get("titulo"),
                 "resumo": result.get("resumo"),
@@ -175,6 +177,8 @@ class TTSPayload(BaseModel):
 class SessionCreatePayload(BaseModel):
     nome: str
     resposta_inicial: Optional[str] = None
+    email: Optional[str] = None
+    cpf: Optional[str] = None
 
 class AnswerItem(BaseModel):
     question_id: str
@@ -182,6 +186,7 @@ class AnswerItem(BaseModel):
     question_text: str
     answer_text: str
     option_label: Optional[str] = None
+    artifact: Optional[str] = None     # prompt/fluxo a ser analisado em questões case/review
     criteria: Optional[str] = None
     is_correct: Optional[bool] = None
     difficulty: Optional[str] = None   # 'facil' | 'media' | 'dificil'
@@ -190,6 +195,8 @@ class EvaluatePayload(BaseModel):
     nome: str
     answers: List[AnswerItem]
     session_id: Optional[str] = None
+    email: Optional[str] = None
+    cpf: Optional[str] = None
 
 
 class ExternalSessionCreatePayload(BaseModel):
@@ -248,7 +255,13 @@ def create_session(payload: SessionCreatePayload):
         r = requests.post(
             f"{SUPABASE_URL}/rest/v1/sessoes_avaliacao",
             headers=supabase_headers(),
-            json={"nome": payload.nome, "resposta_inicial": payload.resposta_inicial, "status": "em_andamento"},
+            json={
+                "nome": payload.nome,
+                "resposta_inicial": payload.resposta_inicial,
+                "status": "em_andamento",
+                "email": payload.email,
+                "cpf": payload.cpf,
+            },
             timeout=10,
         )
         if not r.ok:
@@ -267,6 +280,8 @@ def evaluate(payload: EvaluatePayload):
     for i, a in enumerate(payload.answers, 1):
         tipo = {"mc": "Múltipla Escolha", "case": "Case", "review": "Review Reverso"}.get(a.question_type, a.question_type)
         lines.append(f"[{i}] {tipo} — {a.question_text}")
+        if a.artifact:
+            lines.append(f"Artefato analisado pelo candidato (prompt/fluxo apresentado na questão):\n{a.artifact}")
         if a.difficulty:
             lines.append(f"Dificuldade da questão: {a.difficulty}")
         resp = f"{a.option_label} — {a.answer_text}" if a.option_label else a.answer_text
@@ -302,6 +317,8 @@ def evaluate(payload: EvaluatePayload):
         nome=payload.nome,
         answers=[a.model_dump() for a in payload.answers],
         result=result,
+        email=payload.email,
+        cpf=payload.cpf,
     )
 
     return result
