@@ -55,7 +55,7 @@ def require_partner_api_key(x_api_key: Optional[str] = Header(None)):
         raise HTTPException(status_code=401, detail="X-API-Key inválida ou ausente.")
 
 
-def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, result: dict, email: Optional[str] = None, cpf: Optional[str] = None):
+def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, result: dict, email: Optional[str] = None, cpf: Optional[str] = None, pontuacao: Optional[dict] = None):
     if not SUPABASE_KEY:
         return
     try:
@@ -72,6 +72,7 @@ def save_evaluation_result(session_id: Optional[str], nome: str, answers: list, 
                 "resumo": result.get("resumo"),
                 "questoes": result.get("questoes"),
                 "proximos_passos": result.get("proximos_passos"),
+                "pontuacao": pontuacao,
                 "respostas": answers,
             },
             timeout=10,
@@ -401,6 +402,7 @@ def evaluate(payload: EvaluatePayload):
         result=result,
         email=payload.email,
         cpf=payload.cpf,
+        pontuacao=score_breakdown,
     )
 
     return result
@@ -433,6 +435,45 @@ def api_create_avaliacao(payload: ExternalSessionCreatePayload, _auth=Depends(re
 
     assessment_url = f"{FRONTEND_URL}/?session_id={session_id}&nome={payload.nome}"
     return {"session_id": session_id, "assessment_url": assessment_url}
+
+
+@app.get("/api/v1/avaliacoes")
+def api_list_avaliacoes(email: Optional[str] = None, cpf: Optional[str] = None, _auth=Depends(require_partner_api_key)):
+    if not SUPABASE_KEY:
+        raise HTTPException(status_code=503, detail="Supabase não configurado no servidor.")
+    if not email and not cpf:
+        raise HTTPException(status_code=400, detail="Informe email ou cpf como query param.")
+    try:
+        params = {"order": "created_at.desc", "limit": 200}
+        if email:
+            params["email"] = f"eq.{email}"
+        else:
+            params["cpf"] = f"eq.{cpf}"
+        r = requests.get(
+            f"{SUPABASE_URL}/rest/v1/avaliacoes_resultado",
+            headers=supabase_headers(),
+            params=params,
+            timeout=10,
+        )
+        if not r.ok:
+            raise HTTPException(status_code=502, detail=f"Erro Supabase: {r.status_code} {r.text}")
+        rows = r.json()
+        resultados = [{
+            "session_id": row.get("session_id"),
+            "nome": row.get("nome"),
+            "nivel": row.get("nivel"),
+            "titulo": row.get("titulo"),
+            "resumo": row.get("resumo"),
+            "questoes": row.get("questoes"),
+            "proximos_passos": row.get("proximos_passos"),
+            "pontuacao": row.get("pontuacao"),
+            "criado_em": row.get("created_at"),
+        } for row in rows]
+        return {"total": len(resultados), "resultados": resultados}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/api/v1/avaliacoes/{session_id}")
